@@ -13,6 +13,7 @@
     -[x]Read IMU values and increase LED values based on Gyro/Accel input
     -[]Microphone Values, Dim Lights when microphone values are Low
     -[-]Display battery health of internal and external
+    -[]BLE server using notifications
     -[]Networking to set base colours the same for multiple machines
     -[]Predetermined colour switches set with timers
 
@@ -113,6 +114,8 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
+    }
+    void onWrite(BLEServer* pServer){
     }
 };
 
@@ -419,6 +422,25 @@ void setup()
 //***********************************
 void loop()
 {
+    // notify changed value
+    if (deviceConnected) {
+        pCharacteristic->setValue((uint8_t*)&hue, 4);
+        pCharacteristic->notify();
+        delay(3); // bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
+    }
+    // disconnecting
+    if (!deviceConnected && oldDeviceConnected) {
+        delay(500); // give the bluetooth stack the chance to get things ready
+        pServer->startAdvertising(); // restart advertising
+        Serial.println("start advertising");
+        oldDeviceConnected = deviceConnected;
+    }
+    // connecting
+    if (deviceConnected && !oldDeviceConnected) {
+        // do stuff here on connecting
+        oldDeviceConnected = deviceConnected;
+    }
+
 
   m5.BtnA.read();
   m5.BtnB.read();
