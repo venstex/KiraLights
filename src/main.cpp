@@ -155,7 +155,7 @@ void StartServer(){
 void DrawBitImage(long imageBits[], uint8_t imageScale, uint8_t xOffset, uint8_t yOffset)
 {
   uint8_t _scalingPixel = 0;
-  uint8_t _currentPixel = 0;
+  int _currentPixel = 0;
   uint8_t x = 0;
   uint8_t imageWidth = Img_width;
   uint8_t imageHeight = Img_height;
