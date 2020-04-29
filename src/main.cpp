@@ -1,7 +1,7 @@
 /*****************************************************************
    Author: Steven van der Schoot
    Date Created:  10/02/2020
-   Date Modified: 10/03/2020
+   Date Modified: 29/04/2020
 
 
    WotageiNL kira lights. this script is meant for the M5stickC
@@ -42,11 +42,9 @@ Current components during prototyping are;
 #define NUM_LEDS 16
 
 //BLE
-BLEServer* pServer = NULL;
-BLECharacteristic* pCharacteristic = NULL;
+BLEServer *pServer = NULL;
+BLECharacteristic * pTxCharacteristic;
 bool deviceConnected = false;
-bool oldDeviceConnected = false;
-uint32_t value = 0;
 
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
@@ -58,14 +56,13 @@ enum KiraLightMenu
   MENU_GYRO,
   MENU_DEBUG
 };
-byte appMode = MENU_GYRO;
+byte appMode = MENU_DEBUG;
 
 //FastLED variables
 CRGB leds[NUM_LEDS];
 CHSV newHSVColor = CHSV(10, 255, 10);
 CRGB newRGBColor = CHSV(10, 255, 10);
 uint8_t baseHue = -20;
-uint8_t hue = 0;
 uint8_t Basebrightness = 10;
 uint8_t brightness = 0;
 uint8_t flareThreshold = 150;
@@ -106,7 +103,8 @@ long Image_bits[] PROGMEM = {
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xff58, 0xff58, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xfbe4, 0xfbe4, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
 
-//BLE serverCallbacks example by Neil
+//BLE serverCallbacks example Neil Kolban
+
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
@@ -115,45 +113,53 @@ class MyServerCallbacks: public BLEServerCallbacks {
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
     }
-    void onWrite(BLEServer* pServer){
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      String value = pCharacteristic->getValue().c_str();
+
+      if (value.length() > 0) {
+        Serial.println("*********");
+        Serial.print("New value: ");
+        for (int i = 0; i < value.length(); i++)
+          Serial.print(value[i]);
+
+        Serial.println();
+        Serial.println("*********");
+
+        newHSVColor.hue = value.toInt();
+      }
     }
 };
 
 void StartServer(){
-    // Create the BLE Device
-  BLEDevice::init("KiraLights");
+  Serial.begin(115200);
 
-  // Create the BLE Server
-  pServer = BLEDevice::createServer();
+  Serial.println("Starting BLE server");
+
+  BLEDevice::init("KiraLights");
+  BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  // Create the BLE Service
   BLEService *pService = pServer->createService(SERVICE_UUID);
 
-  // Create a BLE Characteristic
-  pCharacteristic = pService->createCharacteristic(
-                      CHARACTERISTIC_UUID,
-                      BLECharacteristic::PROPERTY_READ   |
-                      BLECharacteristic::PROPERTY_WRITE  |
-                      BLECharacteristic::PROPERTY_NOTIFY |
-                      BLECharacteristic::PROPERTY_INDICATE
-                    );
 
-  // https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.descriptor.gatt.client_characteristic_configuration.xml
-  // Create a BLE Descriptor
-  pCharacteristic->addDescriptor(new BLE2902());
+  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+                                         CHARACTERISTIC_UUID,
+                                         BLECharacteristic::PROPERTY_READ |
+                                         BLECharacteristic::PROPERTY_WRITE
+                                       );
 
-  // Start the service
+  pCharacteristic->setCallbacks(new MyCallbacks());
+
+  pCharacteristic->setValue("Hello World");
   pService->start();
 
-  // Start advertising
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(false);
-  pAdvertising->setMinPreferred(0x0);  // set value to 0x00 to not advertise this parameter
-  BLEDevice::startAdvertising();
-  Serial.println("Waiting a client connection to notify...");
+  BLEAdvertising *pAdvertising = pServer->getAdvertising();
+  pAdvertising->start();
 }
+
 
 void DrawBitImage(long imageBits[], uint8_t imageScale, uint8_t xOffset, uint8_t yOffset)
 {
@@ -283,15 +289,20 @@ void DrawDebugDisplay()
   displayBuffer.setTextColor(WHITE);
   displayBuffer.setCursor(0, 15);
   displayBuffer.println("Debug Mode");
-  DrawBitImage(Image_bits, 4, 1, 40);
+  DrawBitImage(Image_bits, 1, 1, 25);
+  DrawBitImage(Image_bits, 1, 21, 25);
+    DrawBitImage(Image_bits, 1, 41, 25);
+
+  if (deviceConnected)
+  {
+    displayBuffer.setCursor(1,60);
+    displayBuffer.setTextColor(BLUE);
+    displayBuffer.println("BLE Active!");
+  }
 
   //displayBuffer.drawLine(30,0,30,80,CrgbtoHex(newHSVColor));
 
   displayBuffer.pushSprite(0, 0);
-}
-
-void DebugColorTest()
-{
 }
 
 //***********************************
@@ -315,7 +326,6 @@ void MotionFlareTask(void *pvParameters)
       if (sigmaGyro > flareThreshold && brightness < 255)
       {
         brightness += flareUp;
-        hue += flareUp;
       }
       else if (brightness > dropoff)
       {
@@ -336,7 +346,6 @@ void FlareCoolDown(void *pvParameters)
         //brightness = Basebrightness;
         //hue = baseHue;
         brightness -= dropoff;
-        hue -= dropoff;
       }
     }
     vTaskDelay(300 / portTICK_PERIOD_MS);
@@ -422,25 +431,8 @@ void setup()
 //***********************************
 void loop()
 {
-    // notify changed value
-    if (deviceConnected) {
-        pCharacteristic->setValue((uint8_t*)&hue, 4);
-        pCharacteristic->notify();
-        delay(3); // bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
-    }
-    // disconnecting
-    if (!deviceConnected && oldDeviceConnected) {
-        delay(500); // give the bluetooth stack the chance to get things ready
-        pServer->startAdvertising(); // restart advertising
-        Serial.println("start advertising");
-        oldDeviceConnected = deviceConnected;
-    }
-    // connecting
-    if (deviceConnected && !oldDeviceConnected) {
-        // do stuff here on connecting
-        oldDeviceConnected = deviceConnected;
-    }
 
+  
 
   m5.BtnA.read();
   m5.BtnB.read();
