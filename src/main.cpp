@@ -13,7 +13,7 @@
     -[x]Read IMU values and increase LED values based on Gyro/Accel input
     -[]Microphone Values, Dim Lights when microphone values are Low
     -[-]Display battery health of internal and external
-    -[]BLE server using notifications
+    -[x]BLE server that allows writing values
     -[]Networking to set base colours the same for multiple machines
     -[]Predetermined colour switches set with timers
 
@@ -124,12 +124,15 @@ class MyCallbacks: public BLECharacteristicCallbacks {
         Serial.print("New value: ");
         for (int i = 0; i < value.length(); i++)
           Serial.print(value[i]);
-
         Serial.println();
         Serial.println("*********");
 
         newHSVColor.hue = value.toInt();
       }
+    }
+    void onRead(BLECharacteristic *pCharacteristic){
+      std::string rxvalue = String(newHSVColor.hue).c_str();
+      pCharacteristic->setValue(rxvalue);
     }
 };
 
@@ -153,7 +156,6 @@ void StartServer(){
 
   pCharacteristic->setCallbacks(new MyCallbacks());
 
-  pCharacteristic->setValue("Hello World");
   pService->start();
 
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
