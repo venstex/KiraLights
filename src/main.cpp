@@ -1,7 +1,7 @@
 /*****************************************************************
    Author: Steven van der Schoot
    Date Created:  10/02/2020
-   Date Modified: 29/04/2020
+   Date Modified: 21/05/2020
 
 
    WotageiNL kira lights. this script is meant for the M5stickC
@@ -43,10 +43,10 @@ Current components during prototyping are;
 
 //BLE
 BLEServer *pServer = NULL;
-BLECharacteristic * pTxCharacteristic;
+BLECharacteristic *pTxCharacteristic;
 bool deviceConnected = false;
 
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
 //Menu
@@ -57,6 +57,10 @@ enum KiraLightMenu
   MENU_DEBUG
 };
 byte appMode = MENU_DEBUG;
+
+TaskHandle_t PatternCylonHandle = NULL;
+TaskHandle_t MotionFlareTaskHandle = NULL;
+//TaskHandle_t FlareCoolDownHandle = NULL;
 
 //FastLED variables
 CRGB leds[NUM_LEDS];
@@ -105,38 +109,68 @@ long Image_bits[] PROGMEM = {
 
 //BLE serverCallbacks example Neil Kolban
 
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-    };
+void PatternCylon();
 
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-    }
+class MyServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *pServer)
+  {
+    deviceConnected = true;
+  };
+
+  void onDisconnect(BLEServer *pServer)
+  {
+    deviceConnected = false;
+  }
 };
 
-class MyCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      String value = pCharacteristic->getValue().c_str();
+class MyCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *pCharacteristic)
+  {
+    String value = pCharacteristic->getValue().c_str();
 
-      if (value.length() > 0) {
-        Serial.println("*********");
-        Serial.print("New value: ");
-        for (int i = 0; i < value.length(); i++)
-          Serial.print(value[i]);
-        Serial.println();
-        Serial.println("*********");
+    if (value.length() > 0)
+    {
+      Serial.println("*********");
+      Serial.print("New value: ");
+      for (int i = 0; i < value.length(); i++)
+        Serial.print(value[i]);
+      Serial.println();
+      Serial.println("*********");
 
+      if (value == "Clear")
+      {
+        newHSVColor.hue = 10;
+        newHSVColor.value = 20;
+        vTaskSuspend(PatternCylonHandle);
+        vTaskSuspend(MotionFlareTaskHandle);
+        //vTaskSuspend(FlareCoolDownHandle);
+      }
+      else if (value == "Cylon")
+      {
+        vTaskResume(PatternCylonHandle);
+      }
+      else if (value == "Flare")
+      {
+        vTaskResume(MotionFlareTaskHandle);
+        //vTaskResume(FlareCoolDownHandle);
+      }
+      else
+      {
         newHSVColor.hue = value.toInt();
       }
     }
-    void onRead(BLECharacteristic *pCharacteristic){
-      std::string rxvalue = String(newHSVColor.hue).c_str();
-      pCharacteristic->setValue(rxvalue);
-    }
+  }
+  void onRead(BLECharacteristic *pCharacteristic)
+  {
+    std::string rxvalue = String(newHSVColor.hue).c_str();
+    pCharacteristic->setValue(rxvalue);
+  }
 };
 
-void StartServer(){
+void StartServer()
+{
   Serial.begin(115200);
 
   Serial.println("Starting BLE server");
@@ -147,12 +181,10 @@ void StartServer(){
 
   BLEService *pService = pServer->createService(SERVICE_UUID);
 
-
   BLECharacteristic *pCharacteristic = pService->createCharacteristic(
-                                         CHARACTERISTIC_UUID,
-                                         BLECharacteristic::PROPERTY_READ |
-                                         BLECharacteristic::PROPERTY_WRITE
-                                       );
+      CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_WRITE);
 
   pCharacteristic->setCallbacks(new MyCallbacks());
 
@@ -161,7 +193,6 @@ void StartServer(){
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
   pAdvertising->start();
 }
-
 
 void DrawBitImage(long imageBits[], uint8_t imageScale, uint8_t xOffset, uint8_t yOffset)
 {
@@ -293,11 +324,11 @@ void DrawDebugDisplay()
   displayBuffer.println("Debug Mode");
   DrawBitImage(Image_bits, 1, 1, 25);
   DrawBitImage(Image_bits, 1, 21, 25);
-    DrawBitImage(Image_bits, 1, 41, 25);
+  DrawBitImage(Image_bits, 1, 41, 25);
 
   if (deviceConnected)
   {
-    displayBuffer.setCursor(1,60);
+    displayBuffer.setCursor(1, 60);
     displayBuffer.setTextColor(BLUE);
     displayBuffer.println("BLE Active!");
   }
@@ -325,15 +356,16 @@ void MotionFlareTask(void *pvParameters)
   {
     //if (appMode == MENU_GYRO)
     {
-      if (sigmaGyro > flareThreshold && brightness < 255)
+      if (sigmaGyro > flareThreshold && brightness < 200)
       {
         brightness += flareUp;
       }
       else if (brightness > dropoff)
       {
+        brightness -= dropoff;
       }
     }
-    vTaskDelay(300 / portTICK_PERIOD_MS);
+    vTaskDelay(20 / portTICK_PERIOD_MS);
   }
 }
 
@@ -350,7 +382,7 @@ void FlareCoolDown(void *pvParameters)
         brightness -= dropoff;
       }
     }
-    vTaskDelay(300 / portTICK_PERIOD_MS);
+    vTaskDelay(40 / portTICK_PERIOD_MS);
   }
 }
 
@@ -365,6 +397,9 @@ void SetBrightnessToHSV()
     newHSVColor.value = 255;
     brightness = 255;
   }
+
+    fill_solid(leds, NUM_LEDS, newHSVColor);
+    FastLED.show();
 
   // if (hue < 255)
   // {
@@ -387,23 +422,50 @@ void ColorPickerButton()
   }
 }
 
-//Code that will handle picking a color and setting it to the LED array
-void ChangeLEDColor()
+void fadeall()
 {
-  //newRGBColor = HextoCrgb(0xf2b7);
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    leds[i].nscale8(250);
+  }
 }
 
-//***********************************
-//Drive LED on second core
-//***********************************
-void FastLEDshowTask(void *pvParameters)
+void PatternCylon(void *pvParameters)
 {
-  for (;;)
+  while (true)
   {
-    fill_solid(leds, NUM_LEDS, newHSVColor);
-    FastLED.show();
+    /* code */
+    static uint8_t hue = 0;
+    Serial.print("x");
+    // First slide the led in one direction
+    for (int i = 0; i < NUM_LEDS; i++)
+    {
+      // Set the i'th led to red
+      leds[i] = CHSV(hue++, 255, 160);
+      // Show the leds
+      FastLED.show();
+      // now that we've shown the leds, reset the i'th led to black
+      leds[i] = CRGB::Black;
+      fadeall();
+      // Wait a little bit before we loop around and do it again
+      delay(20);
+    }
+    Serial.print("x");
+
+    // Now go in the other direction.
+    for (int i = (NUM_LEDS)-1; i >= 0; i--)
+    {
+      // Set the i'th led to red
+      leds[i] = CHSV(hue++, 255, 160);
+      // Show the leds
+      FastLED.show();
+      // now that we've shown the leds, reset the i'th led to black
+      leds[i] = CRGB::Black;
+      fadeall();
+      // Wait a little bit before we loop around and do it again
+      delay(20);
+    }
   }
-  vTaskDelay(10 / portTICK_PERIOD_MS);
 }
 
 //***********************************
@@ -423,9 +485,13 @@ void setup()
   // Neopixel initialization
   FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
 
-  xTaskCreatePinnedToCore(FastLEDshowTask, "FastLEDshowTask", 2048, NULL, 2, NULL, 1);
-  xTaskCreate(MotionFlareTask, "MotionFlareTask", 1024, NULL, 2, NULL);
-  xTaskCreate(FlareCoolDown, "FlareCoolDown", 1024, NULL, 2, NULL);
+  xTaskCreate(MotionFlareTask, "MotionFlare", 1024, NULL, 2, &MotionFlareTaskHandle);
+  //xTaskCreate(FlareCoolDown, "FlareCoolDown", 1024, NULL, 2, &FlareCoolDownHandle);
+  xTaskCreate(PatternCylon, "PatternCylonTask", 1024, NULL, 2, &PatternCylonHandle);
+
+  vTaskSuspend(PatternCylonHandle);
+  vTaskSuspend(MotionFlareTaskHandle);
+  //vTaskSuspend(FlareCoolDownHandle);
 }
 
 //***********************************
@@ -433,9 +499,6 @@ void setup()
 //***********************************
 void loop()
 {
-
-  
-
   m5.BtnA.read();
   m5.BtnB.read();
 
@@ -479,6 +542,7 @@ void loop()
         ;
     }
     break;
+
 
   default:
     break;
