@@ -1,21 +1,12 @@
 /*****************************************************************
    Author: Steven van der Schoot
    Date Created:  10/02/2020
-   Date Modified: 21/05/2020
+   Date Modified: 25/05/2020
 
 
    WotageiNL kira lights. this script is meant for the M5stickC
    This is a prototype to test if its possible to build a Cheer
    Light for music concerts
-
-   Possible features
-    -[x]Drive Leds with specific color values
-    -[x]Read IMU values and increase LED values based on Gyro/Accel input
-    -[]Microphone Values, Dim Lights when microphone values are Low
-    -[-]Display battery health of internal and external
-    -[x]BLE server that allows writing values
-    -[]Networking to set base colours the same for multiple machines
-    -[]Predetermined colour switches set with timers
 
 Current components during prototyping are;
 -ESP32-PICO
@@ -107,8 +98,6 @@ long Image_bits[] PROGMEM = {
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xff58, 0xff58, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xfbe4, 0xfbe4, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
 
-//BLE serverCallbacks example Neil Kolban
-
 void PatternCylon();
 
 class MyServerCallbacks : public BLEServerCallbacks
@@ -132,33 +121,26 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
     if (value.length() > 0)
     {
-      Serial.println("*********");
-      Serial.print("New value: ");
-      for (int i = 0; i < value.length(); i++)
-        Serial.print(value[i]);
-      Serial.println();
-      Serial.println("*********");
-
       if (value == "Clear")
       {
         newHSVColor.hue = 10;
         newHSVColor.value = 20;
-        vTaskSuspend(PatternCylonHandle);
-        vTaskSuspend(MotionFlareTaskHandle);
-        //vTaskSuspend(FlareCoolDownHandle);
+        vTaskSuspendAll();
       }
       else if (value == "Cylon")
       {
+        vTaskSuspendAll();
         vTaskResume(PatternCylonHandle);
       }
       else if (value == "Flare")
       {
+        vTaskSuspendAll();
         vTaskResume(MotionFlareTaskHandle);
-        //vTaskResume(FlareCoolDownHandle);
       }
       else
       {
         newHSVColor.hue = value.toInt();
+        FastLED.show();
       }
     }
   }
@@ -354,16 +336,13 @@ void MotionFlareTask(void *pvParameters)
 {
   while (1)
   {
-    //if (appMode == MENU_GYRO)
+    if (sigmaGyro > flareThreshold && brightness < 200)
     {
-      if (sigmaGyro > flareThreshold && brightness < 200)
-      {
-        brightness += flareUp;
-      }
-      else if (brightness > dropoff)
-      {
-        brightness -= dropoff;
-      }
+      brightness += flareUp;
+    }
+    else if (brightness > dropoff)
+    {
+      brightness -= dropoff;
     }
     vTaskDelay(20 / portTICK_PERIOD_MS);
   }
@@ -373,16 +352,13 @@ void FlareCoolDown(void *pvParameters)
 {
   while (1)
   {
-    //if (appMode == MENU_GYRO)
-    {
       if (brightness > dropoff)
       {
         //brightness = Basebrightness;
         //hue = baseHue;
         brightness -= dropoff;
       }
-    }
-    vTaskDelay(40 / portTICK_PERIOD_MS);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 
@@ -398,8 +374,8 @@ void SetBrightnessToHSV()
     brightness = 255;
   }
 
-    fill_solid(leds, NUM_LEDS, newHSVColor);
-    FastLED.show();
+  fill_solid(leds, NUM_LEDS, newHSVColor);
+  FastLED.show();
 
   // if (hue < 255)
   // {
@@ -430,41 +406,40 @@ void fadeall()
   }
 }
 
+
+
 void PatternCylon(void *pvParameters)
 {
   while (true)
   {
-    /* code */
     static uint8_t hue = 0;
-    Serial.print("x");
-    // First slide the led in one direction
-    for (int i = 0; i < NUM_LEDS; i++)
-    {
-      // Set the i'th led to red
-      leds[i] = CHSV(hue++, 255, 160);
-      // Show the leds
-      FastLED.show();
-      // now that we've shown the leds, reset the i'th led to black
-      leds[i] = CRGB::Black;
-      fadeall();
-      // Wait a little bit before we loop around and do it again
-      delay(20);
-    }
-    Serial.print("x");
+    static int cyloni = 0;
+    static bool cylonforward = true;
 
-    // Now go in the other direction.
-    for (int i = (NUM_LEDS)-1; i >= 0; i--)
-    {
-      // Set the i'th led to red
-      leds[i] = CHSV(hue++, 255, 160);
-      // Show the leds
-      FastLED.show();
-      // now that we've shown the leds, reset the i'th led to black
-      leds[i] = CRGB::Black;
       fadeall();
-      // Wait a little bit before we loop around and do it again
-      delay(20);
+      leds[cyloni] = CHSV(hue++, 255, 160);
+      FastLED.show();
+      leds[cyloni] = CRGB::Black;
+
+    if (cylonforward == true)
+    {
+      cyloni++;
+    }else
+    {
+      cyloni --;
     }
+      Serial.println(cyloni);
+    
+    if (cyloni >= (2*8) && cylonforward == true)
+    {
+      Serial.println("reversing Direction");
+      cylonforward = false;
+    }else if (cyloni == 0 && cylonforward == false)
+    {
+      Serial.println("Forward Direction"); 
+      cylonforward = true;
+    }
+    vTaskDelay(50 / portTICK_PERIOD_MS);
   }
 }
 
@@ -489,7 +464,7 @@ void setup()
   //xTaskCreate(FlareCoolDown, "FlareCoolDown", 1024, NULL, 2, &FlareCoolDownHandle);
   xTaskCreate(PatternCylon, "PatternCylonTask", 1024, NULL, 2, &PatternCylonHandle);
 
-  vTaskSuspend(PatternCylonHandle);
+  //vTaskSuspend(PatternCylonHandle);
   vTaskSuspend(MotionFlareTaskHandle);
   //vTaskSuspend(FlareCoolDownHandle);
 }
@@ -542,7 +517,6 @@ void loop()
         ;
     }
     break;
-
 
   default:
     break;
